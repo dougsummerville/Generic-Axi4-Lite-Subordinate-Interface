@@ -71,7 +71,7 @@ entity axi4_lite_interface_v1_0 is
 end axi4_lite_interface_v1_0;
 
 architecture arch_imp of axi4_lite_interface_v1_0 is
-
+    --signals to provide read access to output port
 	signal awready	: std_logic;
 	signal wready	: std_logic;
 	signal bresp	: std_logic_vector(1 downto 0);
@@ -80,6 +80,8 @@ architecture arch_imp of axi4_lite_interface_v1_0 is
     signal rdata	: std_logic_vector(32*(1+DATA_BUS_IS_64_BITS)-1 downto 0);
 	signal rresp	: std_logic_vector(1 downto 0);
 	signal rvalid	: std_logic;
+    signal sig_read_enable: std_logic;
+
     
     type subordinate_register_array is array( 0 to 2**ADDR_WIDTH -1) of std_logic_vector(32*(1+DATA_BUS_IS_64_BITS)-1 downto 0); 
 	signal reg	: subordinate_register_array;
@@ -126,7 +128,7 @@ begin
     end process;
 
     --subordinate read signals must be asynchronous out so the subordinate gets them in the current clock cycle
-    process(all) begin
+    process(arready,SAXI_RREADY,rvalid,read_addr_stall_reg,SAXI_ARVALID,local_read_addr) begin
         read_enable <= '0';
         read_address <= (others => '-');
         --start new transaction
@@ -142,15 +144,16 @@ begin
     
     --read data channel
     --if the peripheral has a synchronous output then timing requires we connect that directly to SAXI_RDAYA
-    gen_read_port: if (SUBORDINATE_SYNCHRONOUS_READ_PORT) generate
+    gen_read_port_then: if (SUBORDINATE_SYNCHRONOUS_READ_PORT) generate
         rdata<= read_data;
+    end generate;
     --otherwise, we create an output regoster
-    else generate
+    gen_read_port_else: if (NOT SUBORDINATE_SYNCHRONOUS_READ_PORT ) generate
         process(SAXI_ACLK) begin
             if rising_edge(SAXI_ACLK) then
                 if SAXI_ARESETN = '0' then
                     rdata<=(others => '0'); 
-                elsif read_enable='1' then
+                elsif sig_read_enable='1' then
                     rdata<=read_data; 
                 end if;
             end if;
@@ -241,7 +244,8 @@ begin
     end if;
     end process;
     
-    process(all) 
+    process(awready,wready,SAXI_BREADY,write_addr_stall_reg,write_data_stall_reg,write_strobe_stall_reg,SAXI_WDATA,SAXI_WSTRB,SAXI_WVALID,
+        SAXI_AWVALID,local_write_addr) 
     begin
         --start new transaction (reverse priority of if's)
         
